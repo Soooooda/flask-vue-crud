@@ -37,7 +37,7 @@ app = Flask(__name__)
 app.config.from_object(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# the redis part didn't work
+# the redis part didn't work 用于登录注册
 app.config['SECRET_KEY'] = 'wozaiperflabdagong2'
 app.config['SESSION_USE_SIGNER'] = True  # 是否对发送到浏览器上session的cookie值进行加密
 app.config['SESSION_TYPE'] = 'redis'  # session类型为redis
@@ -50,7 +50,7 @@ f_session.init_app(app)
 
 # enable CORS
 CORS(app, resources={r'/*': {'origins': '*'}})
-# cors = CORS(app, origins=["*"], headers=['Content-Type'], expose_headers=['Access-Control-Allow-Origin'], supports_credentials=True)
+app.logger.info('Metis服务启动')
 
 # sanity check route
 @app.route('/ping', methods=['GET'])
@@ -62,72 +62,56 @@ def ping_pong():
 VIDEOS = []
 Video_arr = []
 Video_dir = UPLOAD_FOLDER
-# Video_arr = os.listdir(Video_dir)
-# print(Video_arr)
-print('hi')
 
 types = ('*.mp4', '*.mkv') # the tuple of file types
 for files in types:
     Video_arr.extend(glob(os.path.join(Video_dir,'videos/'+ files)))
 
+app.logger.info('读取已有的视频')
 for v in Video_arr:
     v = v.split('/')[-1].split('.')[0]
-    print(v)
+    # print(v)
+    
     vi = {}
     vi['id'] = uuid.uuid4().hex
     vi['title'] = v
-    # vi['author'] = 'anony'
     vi['read'] = False
-    if os.path.isdir(os.path.join(app.config['UPLOAD_FOLDER'],'frames/'+ v)):
+    if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'],'json/'+ v+'.json')):
         vi['read'] = True
     VIDEOS.append(vi)
-
-#@app.after_request
-# def add_header(response):
-#     response.headers['X-Content-Type-Options'] = 'nosniff'
-#     return response
+    app.logger.info('视频：%s，是否分析过：%r',v,vi['read'])
 
 # 0 成功
 # -1 用户名或密码错误
+# 登录功能，没有使用
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # session['test10111'] = 'useredis2223'
     response_object = {'status': '-1'}
     if request.method == 'POST':
         post_data = request.get_json()
         userName = post_data.get('username')
         pwd = post_data.get('password')
-        print(userName,pwd)
         if userName == USERNAME and pwd == PWD:
-            print('yes!')
             response_object['status'] = '0'
             session['status'] = '0'
         else:
             session['status'] = '-1'
     else:
-        # print(session['status'])
         if 'status' in session and session['status'] == '0':
-            print('here is session')
             response_object['status'] = '0'
         else:
             response_object['status'] = '-1'
-    print('here')
-    # response = make_response(jsonify(response=get_articles(ARTICLES_NAME)))
-    return jsonify(response_object)# , 200, {'Access-Control-Allow-Credentials': 'true','Access-Control-Allow-Origin':'http://10.19.199.137:5000'}
+    return jsonify(response_object)
 
-
-
+# 登录功能，没有使用
 @app.route('/getsession', methods=['GET', 'POST'])
 def getsession():
     response_object = {'status': session['test10111']}
-    # if request.method == 'GET':
-    #     response_object['status'] = session.get('status')
     return jsonify(response_object)
 
 def remove_book(book_id):
     for book in VIDEOS:
         if book['id'] == book_id:
-            print("remove")
             if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], 'videos/'+book['title']+'.mp4')):
                 os.system("rm -rf " + os.path.join(app.config['UPLOAD_FOLDER'], 'videos/'+book['title']+'.mp4'))
             if os.path.isdir(os.path.join(app.config['UPLOAD_FOLDER'], 'frames/'+book['title'])):
@@ -135,7 +119,6 @@ def remove_book(book_id):
             if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+book['title']+'.json')):
                 os.system("rm -rf " + os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+book['title']+'.json'))
             VIDEOS.remove(book)
-            print(VIDEOS)
             return True
     return False
 
@@ -143,49 +126,47 @@ def remove_book(book_id):
 def single_book(book_id):
     response_object = {'status': 'success'}
     if request.method == 'PUT':
-        print('put success')
-        print(book_id)
         post_data = request.get_json()
-        
-
-        # process video
-        # print(post_data.get('read'))
-
-        readOrNot = True
+        Need2Analyze = True
         for book in VIDEOS:
             if book['id'] == book_id:
                 if book['read']==True:
-                    readOrNot = False
-                book['read'] = readOrNot
+                    Need2Analyze = False
+                book['read'] = Need2Analyze
 
-        if readOrNot==True:
+        if Need2Analyze==True:# 需要分析
+            
+            #是否处理成帧过
             if os.path.isdir(os.path.join(app.config['UPLOAD_FOLDER'], 'frames/'+post_data.get('title')))!=True:
                 path = os.path.join(app.config['UPLOAD_FOLDER'], 'videos/'+post_data.get('title')+'.mp4')
-                print("read data video")
-                print(path)
+                
                 vidcap = cv2.VideoCapture(path)
                 success2,image2 = vidcap.read()
                 count = 0
-                print('Read a new video: ', success2)
+                app.logger.info("开始把视频处理成帧, 是否成功：%r(该步骤很慢)",success2)
                 os.system('mkdir /home/test/Desktop/flask-vue-crud/assets/frames/'+post_data.get('title'))
                 while success2:
                     cv2.imwrite(os.path.join(app.config['UPLOAD_FOLDER'], "frames/"+post_data.get('title')+"/frame%d.png" % count), image2)
                     success2,image2 = vidcap.read()
                     count += 1
+                app.logger.info("一共处理了%d帧",count)
             # turn frames into JSONs
-            if os.path.isdir(os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+post_data.get('title')+'.json'))!=True:
+            if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+post_data.get('title')+'.json'))!=True:
                 frames2Score(post_data.get('title'))
 
-        else:
+        else: # 需要删掉分析
             if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+post_data.get('title')+'.json')):
                 os.system("rm " + os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+post_data.get('title')+'.json'))
+                app.logger.info("删除分析过的文件成功")
 
         response_object['message'] = 'Book updated!'
     if request.method == 'DELETE':
-        remove_book(book_id)
+        if(remove_book(book_id)):
+            app.logger.info("删除视频成功！")
         response_object['message'] = 'Book removed!'
     return jsonify(response_object)
 
+# test
 @app.route('/result',methods=['GET'])
 def result():
     print ("test")
@@ -194,51 +175,14 @@ def result():
 #Upload Video
 @app.route('/upload/video',methods=['GET','POST'])
 def uploadVideo():
-    print("hehe")
     if request.method == 'POST':
-        print(request)
-        # print(request.files)
+        
         file = request.files['file']
-        print('file')
         filename = secure_filename(file.filename)
-
-
+        app.logger.info("开始上传视频：%s",file.filename)
         path = os.path.join(app.config['UPLOAD_FOLDER'], 'videos/'+filename)
-        print('begin save')
         file.save(path)
-        print('remove former directories')
-
-        # os.system("mkdir " + os.path.join(app.config['UPLOAD_FOLDER'], 'videos/'+filename.split('.')[0]))
-        # print('create path'+filename.split('.')[0])
-        # print('finish')
-        # for root, dirs, files in os.walk(os.path.join(app.config['UPLOAD_FOLDER'], 'images/')):
-        #     for file in files:
-        #         path = os.path.join(os.path.join(app.config['UPLOAD_FOLDER'], 'images/'), file)
-        #         os.remove(path)
-
-        # # process video
-        # vidcap = cv2.VideoCapture(path)
-        # success,image = vidcap.read()
-        # count = 0
-        # print('Read a new video: ', success)
-        # while success:
-        #     cv2.imwrite(os.path.join(app.config['UPLOAD_FOLDER'], 'videos/'+filename.split('.')[0])+"/frame%d.png" % count, image)     # save frame as JPEG file      
-        #     success,image = vidcap.read()
-        #     count += 1
-
-
-               
-        # with zipfile.ZipFile(path, 'r') as zip_ref:
-            # print(os.path.join(app.config['UPLOAD_FOLDER'], str(autoGenFileName),'/'))
-            # zip_ref.extractall(os.path.join(app.config['UPLOAD_FOLDER'], 'videos/'))
-
-        #Save file Info into DB
-        # file = UploadFiles(fileName=newFileName, createdon=datetime.datetime.now(datetime.timezone.utc))
-        # db.session.add(file)
-        # db.session.commit()
         return jsonify({'status':filename.split('.')[0]})
-
-
 
 
 #Upload Scenes
@@ -246,22 +190,17 @@ def uploadVideo():
 def uploadScene():
     if request.method == 'POST':
         path = os.path.join(app.config['UPLOAD_FOLDER'], 'images/')
-        print(request)
         f = request.files['file']
-        print(f.filename)
+        app.logger.info("开始上传图片：%s",f.filename)
         f.save(path+f.filename)
         iq = image2Score(f.filename)
         path = f.filename.split('.')[0] + '_result.png'
-        # image_file.save(path)
-        return jsonify({'iq':str(iq), 'path':path})# 'http://10.19.199.137/'+ path
+        return jsonify({'iq':str(iq), 'path':path})
         
 #Analyze Videos
 @app.route('/analysis',methods=['GET','POST'])
 def analyzeFile():
-    # response_object = {}
     if request.method == 'GET':
-        print("xixi")
-        # IQ_SCORE = frames2Score()
         IQ_SCORE = []
         json_path = os.listdir('/home/test/Desktop/flask-vue-crud/assets/json/')
         for j in json_path:
@@ -269,25 +208,18 @@ def analyzeFile():
             json_string= json.load(f)
             IQ_SCORE.append(json_string)
             f.close()
-
-        # response_object['score'] = IQ_SCORE
-        # print(IQ_SCORE)
+        app.logger.info("IQ score上传成功")
         return jsonify(IQ_SCORE)
-        # print(IQ_SCORE)
-        # return IQ_SCORE
 
 def frames2Score(frame):
+    app.logger.info("开始部署模型(该步骤很慢)")
     trace_path = "models/model_dlss.pt"
     device = "cuda"
     frame_dir = '/home/test/Desktop/flask-vue-crud/assets/frames/'+frame
     result_dir = '/home/test/Desktop/flask-vue-crud/assets/json/'+frame+'.json'
-    # os.system('touch '+ result_dir)
-    # frames = os.listdir(frame_dir)
+
     model = torch.jit.load(trace_path, map_location=device)
-    # results = []
-    # for frame in frames:
-        # if frame=='icon.png':
-            # continue
+
     model.eval()
     model.requires_grad = False
     images_folder = Path(frame_dir)
@@ -297,11 +229,9 @@ def frames2Score(frame):
                             output_key=1,
                             method="dense_prediction",  # method="forward" for metis_ops_current
                             )
-        # results.append(result)
-    print(result)
-    print(type(result))
     with open(result_dir, 'w') as f:
         json.dump(result, f)
+        app.logger.info("存储IQ Score成功")
     return result
 
 
@@ -312,11 +242,6 @@ DEFAULT_TRANSFORM = transforms.Compose([
 
 def display_prediction(img_orig, score):
     img = img_orig.copy()
-    # score = float(score)
-    # font = cv2.FONT_HERSHEY_SIMPLEX
-    # color = (255, 255, 255)
-    # img[:100, 0:250, :] = 0
-    # cv2.putText(img, f"{score:.1f}", (20, 70), font, 2, color, 10, cv2.LINE_AA)
     return img
 
 def predict_on_image(model, method, img, transform, device):
@@ -339,15 +264,8 @@ def full_predict(image_path, model, method, heatmap_params, res_folder, device, 
                               alpha=heatmap_params.alpha, adapt_transperancy=heatmap_params.adapt_transperancy)
     
     heatmap_with_score = display_prediction(heatmap, score)
-    # orig_with_score = display_prediction(image, score)
     print(os.path.join(app.config['UPLOAD_FOLDER'], 'heatmaps/')+image_path.split('.')[0]+"_result.png")
     cv2.imwrite(os.path.join(app.config['UPLOAD_FOLDER'], 'heatmaps/')+image_path.split('/')[-1].split('.')[0]+"_result.png", heatmap_with_score[..., ::-1])
-
-    
-    # for name, img in zip(["orig_score", "heatmap"],
-    #                      [orig_with_score, heatmap_with_score]):
-    #     filename = f"{name}_{image_path.stem}_{score:.2f}.jpg"
-    #     cv2.imwrite(str(res_folder / filename), img[..., ::-1])
         
     return score
 
@@ -371,27 +289,12 @@ def image2Score(path):
     model.eval()
     model.requires_grad = False
 
-    # data_transform = transforms.Compose([
-    #     transforms.ToTensor(),
-    #     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])  # imagenet normalization
-    # ])
-    
     image = os.path.join(app.config['UPLOAD_FOLDER'], 'images/')+path
     device = "cuda"
 
     iq = full_predict(image_path=image, model=model, method=method, 
                      heatmap_params=params_mapping[model_name],
                      res_folder="", device=device)
-    # tensor = data_transform(image).unsqueeze(0).to("cpu")
-    # output = getattr(model, method)(tensor)#model(tensor)
-    # iq_scores_heatmap, iq_score = output
-    # iq_scores_heatmap = iq_scores_heatmap.cpu().detach().numpy()
-    # iq_score = iq_score.cpu().detach().item()
-    # heatmap = generate_heatmap(dense_prediction=iq_scores_heatmap,#.detach().numpy(),
-    #                                image=image, adapt_transperancy=False)
-    # cv2.imwrite(os.path.join(app.config['UPLOAD_FOLDER'], 'heatmaps/')+path.split('.')[0]+"_result.png", heatmap[..., ::-1])
-    # iq = iq_score.detach().numpy()[0]
-    # print("iq score: %f"%(iq))
     return iq
 
 def generate_heatmap(dense_prediction: np.ndarray, image: np.ndarray, alpha: float = 0.3, vmin: float = 0.0,
@@ -430,17 +333,19 @@ def generate_heatmap(dense_prediction: np.ndarray, image: np.ndarray, alpha: flo
 
 @app.route('/books', methods=['GET', 'POST'])
 def all_books():
+    
     response_object = {'status': 'success'}
     if request.method == 'POST':
         post_data = request.get_json()
         VIDEOS.append({
             'id': uuid.uuid4().hex,
             'title': post_data.get('title'),
-            # 'author': post_data.get('author'),
             'read': post_data.get('read')
         })
+        app.logger.info("更新视频信息成功")
         response_object['message'] = 'Book added!'
     else:
+        app.logger.info("返回视频信息成功")
         response_object['books'] = VIDEOS
     return jsonify(response_object)
 
