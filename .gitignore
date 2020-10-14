@@ -3,3 +3,10 @@ node_modules/
 /dist/
 env/
 __pycache__
+server/models/
+server/nohup.out
+assets/frames/
+assets/heatmaps/
+assets/images/
+assets/json/
+assets/videos/
