@@ -14,12 +14,24 @@ from torchvision import transforms
 import csv
 import cv2
 from matplotlib.colors import LinearSegmentedColormap
-import redis
+# import redis
 from flask_session import Session
 from glob import glob
 import json
+from collections import namedtuple
 
-UPLOAD_FOLDER = '/home/test/Desktop/flask-vue-crud/assets/'
+# models
+HeatmapParams = namedtuple("HeatmapParams", 
+                          ["vmin", "vmax", "alpha", "adapt_transperancy"])
+params_mapping = {"DLSS": 
+                      HeatmapParams(vmin=0, vmax=10.0, alpha=0.5, adapt_transperancy=False),
+                 "OPS": 
+                      HeatmapParams(vmin=-20, vmax=20.0, alpha=0.5, adapt_transperancy=False)}
+methods_mapping = {"DLSS": "dense_prediction",
+                   "OPS": "forward",
+                  }
+
+UPLOAD_FOLDER = '../assets/'
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif'}
    
 
@@ -38,12 +50,12 @@ app.config.from_object(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # the redis part didn't work 用于登录注册
-app.config['SECRET_KEY'] = 'wozaiperflabdagong2'
-app.config['SESSION_USE_SIGNER'] = True  # 是否对发送到浏览器上session的cookie值进行加密
-app.config['SESSION_TYPE'] = 'redis'  # session类型为redis
-app.config['SESSION_KEY_PREFIX'] = 'session:'  # 保存到session中的值的前缀
-app.config['PERMANENT_SESSION_LIFETIME'] = 7200  # 失效时间 秒
-app.config['SESSION_REDIS'] = redis.Redis.from_url("redis://0.0.0.0:6379")  # redis数据库连接
+# app.config['SECRET_KEY'] = 'wozaiperflabdagong2'
+# app.config['SESSION_USE_SIGNER'] = True  # 是否对发送到浏览器上session的cookie值进行加密
+# app.config['SESSION_TYPE'] = 'redis'  # session类型为redis
+# app.config['SESSION_KEY_PREFIX'] = 'session:'  # 保存到session中的值的前缀
+# app.config['PERMANENT_SESSION_LIFETIME'] = 7200  # 失效时间 秒
+# app.config['SESSION_REDIS'] = redis.Redis.from_url("redis://0.0.0.0:6379")  # redis数据库连接
 
 # 绑定flask 对象
 f_session.init_app(app)
@@ -69,17 +81,23 @@ for files in types:
 
 app.logger.info('读取已有的视频')
 for v in Video_arr:
-    v = v.split('/')[-1].split('.')[0]
+    title = v.split('/')[-1].split('.')[0]
     # print(v)
     
     vi = {}
     vi['id'] = uuid.uuid4().hex
-    vi['title'] = v
+    vi['title'] = title
     vi['read'] = False
-    if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'],'json/'+ v+'.json')):
+    vi['time'] = int(os.stat(v).st_size*386/32115808)
+    vi['progress'] = 0
+    vi['model'] = 'DLSS'
+    if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'],'json/'+ title+'_DLSS.json')) or os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'],'json/'+ title+'_OPS.json')):
         vi['read'] = True
+        vi['progress'] = vi['time']
+        if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'],'json/'+ title+'_OPS.json')):
+            vi['model'] = 'OPS'
     VIDEOS.append(vi)
-    app.logger.info('视频：%s，是否分析过：%r',v,vi['read'])
+    app.logger.info('视频：%s,是否分析过：%r,时间: %d sec,模型: %s',v,vi['read'],vi['time'],vi['model'])
 
 # 0 成功
 # -1 用户名或密码错误
@@ -116,8 +134,10 @@ def remove_book(book_id):
                 os.system("rm -rf " + os.path.join(app.config['UPLOAD_FOLDER'], 'videos/'+book['title']+'.mp4'))
             if os.path.isdir(os.path.join(app.config['UPLOAD_FOLDER'], 'frames/'+book['title'])):
                 os.system("rm -rf " + os.path.join(app.config['UPLOAD_FOLDER'], 'frames/'+book['title']))
-            if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+book['title']+'.json')):
-                os.system("rm -rf " + os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+book['title']+'.json'))
+            if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+book['title']+'_DLSS.json')):
+                os.system("rm -rf " + os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+book['title']+'_DLSS.json'))
+            if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+book['title']+'_OPS.json')):
+                os.system("rm -rf " + os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+book['title']+'_OPS.json'))
             VIDEOS.remove(book)
             return True
     return False
@@ -133,6 +153,7 @@ def single_book(book_id):
                 if book['read']==True:
                     Need2Analyze = False
                 book['read'] = Need2Analyze
+                book['model'] = post_data.get('model')
 
         if Need2Analyze==True:# 需要分析
             
@@ -144,19 +165,19 @@ def single_book(book_id):
                 success2,image2 = vidcap.read()
                 count = 0
                 app.logger.info("开始把视频处理成帧, 是否成功：%r(该步骤很慢)",success2)
-                os.system('mkdir /home/test/Desktop/flask-vue-crud/assets/frames/'+post_data.get('title'))
+                os.system('mkdir '+os.path.join(app.config['UPLOAD_FOLDER'],'frames/'+post_data.get('title')))
                 while success2:
                     cv2.imwrite(os.path.join(app.config['UPLOAD_FOLDER'], "frames/"+post_data.get('title')+"/frame%d.png" % count), image2)
                     success2,image2 = vidcap.read()
                     count += 1
                 app.logger.info("一共处理了%d帧",count)
             # turn frames into JSONs
-            if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+post_data.get('title')+'.json'))!=True:
-                frames2Score(post_data.get('title'))
+            if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+post_data.get('title')+'_'+post_data.get('model')+'.json'))!=True:
+                frames2Score(post_data.get('title'),post_data.get('model'))
 
         else: # 需要删掉分析
-            if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+post_data.get('title')+'.json')):
-                os.system("rm " + os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+post_data.get('title')+'.json'))
+            if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+post_data.get('title')+'_'+post_data.get('model')+'.json')):
+                os.system("rm " + os.path.join(app.config['UPLOAD_FOLDER'], 'json/'+post_data.get('title')+'_'+post_data.get('model')+'.json'))
                 app.logger.info("删除分析过的文件成功")
 
         response_object['message'] = 'Book updated!'
@@ -182,19 +203,32 @@ def uploadVideo():
         app.logger.info("开始上传视频：%s",file.filename)
         path = os.path.join(app.config['UPLOAD_FOLDER'], 'videos/'+filename)
         file.save(path)
+        # get file size
+        # size = os.stat(path).st_size
+        # app.logger.info("视频大小：%d",size)
         return jsonify({'status':filename.split('.')[0]})
 
 
 #Upload Scenes
-@app.route('/upload/scene',methods=['GET','POST'])
-def uploadScene():
+@app.route('/upload/scene/<model>',methods=['GET','POST'])
+def uploadScene(model):
     if request.method == 'POST':
+        
         path = os.path.join(app.config['UPLOAD_FOLDER'], 'images/')
         f = request.files['file']
+        # model = request.get_json()['model']
         app.logger.info("开始上传图片：%s",f.filename)
+
         f.save(path+f.filename)
-        iq = image2Score(f.filename)
-        path = f.filename.split('.')[0] + '_result.png'
+
+        path = f.filename.split('.')[0] + '_'+model+'_result.png'
+        print('path2:')
+        print(path)
+        if os.path.isfile(path):
+            os.system("rm "+path)
+
+        iq = image2Score(f.filename,model)
+        # path = f.filename.split('.')[0] + '_result.png'
         return jsonify({'iq':str(iq), 'path':path})
         
 #Analyze Videos
@@ -202,21 +236,28 @@ def uploadScene():
 def analyzeFile():
     if request.method == 'GET':
         IQ_SCORE = []
-        json_path = os.listdir('/home/test/Desktop/flask-vue-crud/assets/json/')
+        json_path = os.listdir(os.path.join(app.config['UPLOAD_FOLDER'],'json/'))
         for j in json_path:
-            f = open('/home/test/Desktop/flask-vue-crud/assets/json/'+j)
+            f = open(os.path.join(app.config['UPLOAD_FOLDER'],'json/'+j))
             json_string= json.load(f)
             IQ_SCORE.append(json_string)
             f.close()
         app.logger.info("IQ score上传成功")
         return jsonify(IQ_SCORE)
 
-def frames2Score(frame):
+def frames2Score(frame,model):
     app.logger.info("开始部署模型(该步骤很慢)")
-    trace_path = "models/model_dlss.pt"
+    trace_path = ""
+    method = ""
+    if model=="DLSS":
+        trace_path = "models/model_dlss.pt"
+        method = "dense_prediction"
+    else:
+        trace_path = "models/model_ops.pt"
+        method = "forward"
     device = "cuda"
-    frame_dir = '/home/test/Desktop/flask-vue-crud/assets/frames/'+frame
-    result_dir = '/home/test/Desktop/flask-vue-crud/assets/json/'+frame+'.json'
+    frame_dir = os.path.join(app.config['UPLOAD_FOLDER'],'frames/'+frame)
+    result_dir = os.path.join(app.config['UPLOAD_FOLDER'],'json/'+frame+'_'+model+'.json')
 
     model = torch.jit.load(trace_path, map_location=device)
 
@@ -227,7 +268,7 @@ def frames2Score(frame):
     result = process_dataset(model=model, dataset=dataset, batch_size=1,
                             num_workers=2, device=device,
                             output_key=1,
-                            method="dense_prediction",  # method="forward" for metis_ops_current
+                            method=method,  # method="forward" for metis_ops_current
                             )
     with open(result_dir, 'w') as f:
         json.dump(result, f)
@@ -255,7 +296,7 @@ def predict_on_image(model, method, img, transform, device):
     heatmap_raw, score = output
     return heatmap_raw.cpu().detach().numpy(), score.cpu().detach().item()
 
-def full_predict(image_path, model, method, heatmap_params, res_folder, device, transform=DEFAULT_TRANSFORM):
+def full_predict(model_name,image_path, model, method, heatmap_params, res_folder, device, transform=DEFAULT_TRANSFORM):
     image = cv2.cvtColor(cv2.imread(str(image_path)), cv2.COLOR_BGR2RGB)
     hm_raw, score = predict_on_image(model=model, method=method, img=image, transform=transform, device=device)
     
@@ -264,35 +305,32 @@ def full_predict(image_path, model, method, heatmap_params, res_folder, device, 
                               alpha=heatmap_params.alpha, adapt_transperancy=heatmap_params.adapt_transperancy)
     
     heatmap_with_score = display_prediction(heatmap, score)
-    print(os.path.join(app.config['UPLOAD_FOLDER'], 'heatmaps/')+image_path.split('.')[0]+"_result.png")
-    cv2.imwrite(os.path.join(app.config['UPLOAD_FOLDER'], 'heatmaps/')+image_path.split('/')[-1].split('.')[0]+"_result.png", heatmap_with_score[..., ::-1])
+    print(os.path.join(app.config['UPLOAD_FOLDER'], 'heatmaps/')+image_path.split('/')[-1].split('.')[0]+'_'+model_name+"_result.png")
+    cv2.imwrite(os.path.join(app.config['UPLOAD_FOLDER'], 'heatmaps/')+image_path.split('/')[-1].split('.')[0]+'_'+model_name+"_result.png", heatmap_with_score[..., ::-1])
         
     return score
 
-from collections import namedtuple
-HeatmapParams = namedtuple("HeatmapParams", 
-                          ["vmin", "vmax", "alpha", "adapt_transperancy"])
-params_mapping = {"model_dlss": 
-                      HeatmapParams(vmin=0, vmax=10.0, alpha=0.5, adapt_transperancy=False),
-                 "metis_ops_current": 
-                      HeatmapParams(vmin=-20, vmax=20.0, alpha=0.5, adapt_transperancy=False)}
-methods_mapping = {"model_dlss": "dense_prediction",
-                   "metis_ops_current": "forward",
-                  }
 
 
-def image2Score(path):
-    trace_path = "models/model_dlss.pt"#models/model.pt
-    model_name = Path(trace_path).parts[-1].split('.')[0]
-    method = methods_mapping[model_name]
-    model = torch.jit.load(trace_path)#, map_location="cuda"
+
+def image2Score(path,model):
+    app.logger.info("image2score:%s",model)
+    if model=="DLSS":
+        trace_path = "models/model_dlss.pt"#models/model.pt
+        method = "dense_prediction"
+    else:
+        trace_path = "models/model_ops.pt"
+        method = "forward"
+    model_name = model
+    # method = methods_mapping[model_name]
+    model = torch.jit.load(trace_path, map_location="cuda")
     model.eval()
     model.requires_grad = False
-
+    app.logger.info("模型：%s，方法：%s",model_name,method)
     image = os.path.join(app.config['UPLOAD_FOLDER'], 'images/')+path
     device = "cuda"
 
-    iq = full_predict(image_path=image, model=model, method=method, 
+    iq = full_predict(model_name= model_name,image_path=image, model=model, method=method, 
                      heatmap_params=params_mapping[model_name],
                      res_folder="", device=device)
     return iq
@@ -337,14 +375,27 @@ def all_books():
     response_object = {'status': 'success'}
     if request.method == 'POST':
         post_data = request.get_json()
+        prog = 0
+        # app.logger.info("update videos: 是否")
+        if post_data.get('read')==True:
+            prog = post_data.get('time')
         VIDEOS.append({
             'id': uuid.uuid4().hex,
             'title': post_data.get('title'),
-            'read': post_data.get('read')
+            'read': post_data.get('read'),
+            'time': post_data.get('time'),
+            'progress': prog,
+            'model': post_data.get('model')
         })
+        print(post_data.get('time'))
         app.logger.info("更新视频信息成功")
         response_object['message'] = 'Book added!'
     else:
+        for book in VIDEOS:
+            if book['read']==True:
+                book['progress'] = book['time']
+            else:
+                book['progress'] = 0
         app.logger.info("返回视频信息成功")
         response_object['books'] = VIDEOS
     return jsonify(response_object)
