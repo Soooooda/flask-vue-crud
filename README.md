@@ -26,7 +26,7 @@
     ```
     * Remember to change the path in App.py in the server folder.
     * The log is located in server/nohup.out.
-    * Add a /models director under /server. The models are located in: \\netapp-zj06\bmark10_SH\Cloud_Gaming\Perf_Setup\metis_model
+    * Add a /models director under /server. The models are not available...
 
 4. Deploy frontend -- Vue
     ```sh
