@@ -29,7 +29,11 @@
               
               <b-form method=post enctype=multipart/form-data @submit="uploadScene">
                   <b-form-group label="Image" label-for="scene" label-cols-lg="2">
+                    <b-form-radio v-model="image_model" value="DLSS">DLSS</b-form-radio>
+                    <b-form-radio v-model="image_model" value="OPS">OPS</b-form-radio>
+
                     <b-input-group>
+
                       <b-input-group-prepend is-text>
                         <!-- <b-icon icon="image-fill"></b-icon> -->
                       </b-input-group-prepend>
@@ -65,7 +69,9 @@
               <thead>
                 <tr>
                   <th scope="col">Title</th>
-                  <!-- <th scope="col">Author</th> -->
+                  <th scope="col">Time</th>
+                  <th scope="col">Progress</th>
+                  <th scope="col">Model</th>
                   <th scope="col">Analyzed?</th>
                   <th></th>
                 </tr>
@@ -73,7 +79,17 @@
               <tbody>
                 <tr v-for="(book, index) in books" :key="index">
                   <td>{{ book.title }}</td>
-                  <!-- <td>{{ book.author }}</td> -->
+                  <td>{{ book.time }}</td>
+                  <td>
+                    <!-- <b-progress v-if="book.read" :value="book.time" :max="book.time" show-progress animated></b-progress> -->
+                    <b-progress :value="book.progress" :max="book.time" show-progress animated></b-progress>
+
+                  </td>
+                  <td>
+                    
+                    <b-form-radio :disabled="book.read|| (book.progress<book.time&&book.progress>0)" v-model="book.model" value="DLSS">DLSS</b-form-radio>
+                    <b-form-radio :disabled="book.read|| (book.progress<book.time&&book.progress>0)" v-model="book.model" value="OPS">OPS</b-form-radio>
+                  </td>
                   <td>
                     <span v-if="book.read">Yes</span>
                     <span v-else>No</span>
@@ -84,10 +100,11 @@
                               type="button"
                               class="btn btn-warning btn-sm"
                               v-b-modal.book-update-modal
-                              @click="editBook(book)">
+                              @click="editBook(book,index)">
                           Analyze
                       </button>
                       <button
+                              :disabled="book.read || (book.progress<book.time&&book.progress>0)"
                               type="button"
                               class="btn btn-danger btn-sm"
                               @click="onDeleteBook(book)">
@@ -186,7 +203,9 @@ export default {
       },
       addBookForm: {
         title: '',
-        // author: '',
+        time: 0,
+        progress:0,
+        model:'DLSS',
         read: [],
       },
       message: '',
@@ -194,7 +213,9 @@ export default {
       editForm: {
         id: '',
         title: '',
-        // author: '',
+        time: 0,
+        model:'DLSS',
+        progress: 0,
         read: [],
       },
       file: null,
@@ -216,6 +237,7 @@ export default {
       imgName: 0,
       showOverlay: false,
       blockUser: false,
+      image_model: 'DLSS'
     };
   },
   beforeDestroy() {
@@ -257,29 +279,11 @@ export default {
       this.busy = false;
     },
     onOK() {
-      // this.counter = 1
-      // this.processing = true
-      // // Simulate an async request
-      // this.clearInterval()
-      // this.interval = setInterval(() => {
-      //   if (this.counter < 20) {
-      //     this.counter = this.counter + 1
-      //   } else {
-      //     this.clearInterval()
-      //     this.$nextTick(() => {
-      //       this.busy = this.processing = false
-      //     })
-      //   }
-      // }, 350);
-
-      // this.$refs.addBookModal.hide();
       console.log('upload');
       const data = new FormData();
       data.append('foo', 'bar');
       console.log(document.getElementById('file'));
       data.append('file', document.getElementById('file').files[0]);
-      // this.dismissSecs = 1;
-      // this.showAlert();
       axios.post('http://10.19.199.137:5000/upload/video', data)
         .then((response) => {
           console.log(response);
@@ -292,21 +296,13 @@ export default {
       console.log('upload');
       const data = new FormData();
       data.append('foo', 'bar');
-      console.log(document.getElementById('file').files[0]);
-      data.append('file', document.getElementById('file').files[0]);
+      let upload_video = document.getElementById('file').files[0]
+      data.append('file', upload_video);
       this.dismissSecs = 1000000;
-      // this.dismissSecs = Math.round(parseInt(document.getElementById('file').files[0].size/1024/10240));
       this.message = 'Start Uploading!';
       this.showAlert();
-      // axios.post('http://10.19.199.137:5000/upload/video', data)
-      //   .then((response) => {
-      //     console.log(response);
-      //   })
-      //   .catch((error) => {
-      //     // eslint-disable-next-line
-      //     console.error(error);
-      //   });
       var that = this;
+      console.log(parseInt(upload_video.size*386/32115808))
       axios.post('http://10.19.199.137:5000/upload/video', data)
         .then((response) => {
           that.dismissSecs = 2;
@@ -316,8 +312,10 @@ export default {
           let read = false;
           const payload = {
             title: response.data.status,
-            // author: 'anony',
             read, // property shorthand
+            time: parseInt(upload_video.size*386/32115808),
+            progress: 0,
+            model:'DLSS',
           };
           this.addBook(payload);
           this.initForm();
@@ -353,11 +351,15 @@ export default {
     },
     initForm() {
       this.addBookForm.title = '';
-      // this.addBookForm.author = '';
+      this.addBookForm.time = 0;
+      this.addBookForm.progress = 0;
+      this.addBookForm.model = 'DLSS';
       this.addBookForm.read = [];
       this.editForm.id = '';
       this.editForm.title = '';
-      // this.editForm.author = '';
+      this.editForm.time = 0;
+      this.editForm.progress = 0;
+      this.editForm.model = 'DLSS';
       this.editForm.read = [];
     },
     onSubmitBook(evt) {
@@ -367,7 +369,9 @@ export default {
       if (this.addBookForm.read[0]) read = true;
       const payload = {
         title: this.addBookForm.title,
-        // author: this.addBookForm.author,
+        time: this.addBookForm.time,
+        progress: 0,
+        model: 'DLSS',
         read, // property shorthand
       };
       this.addBook(payload);
@@ -395,8 +399,10 @@ export default {
       data.append('foo', 'bar');
       console.log(document.getElementById('scene'));
       data.append('file', document.getElementById('scene').files[0]);
+      // data.append('model',this.image_model)
       // var that = this
-      axios.post('http://10.19.199.137:5000/upload/scene', data)
+      let model = this.image_model
+      axios.post(`http://10.19.199.137:5000/upload/scene/${model}`, data)
         .then((response) => {
           console.log(response);
           this.Scene_IQ = response.data.iq;
@@ -421,6 +427,8 @@ export default {
       // this.dismissSecs = 10000000;
       // this.message = 'Start Analyzing!';
       // this.showAlert();
+
+
       axios.get(path,{timeout: 12000000})
         .then((res) => {
           // this.dismissSecs = 2
@@ -438,6 +446,7 @@ export default {
           res.data.forEach(function (item, index) {
             console.log(item, index);
             var line_item = {};
+            console.log(item.full_path[0]);
             line_item.name = item.full_path[0].split('/')[2];
             // index;
             line_item.data = item.predicted;
@@ -541,20 +550,45 @@ export default {
       // this.$refs.addBookModal.hide();
       // this.initForm();
     },
-    editBook(book) {
+    editBook(book,index) {
+
+      console.log("here to edit book!");
+      console.log(book.progress);
+      if(book.progress>0 && book.progress<book.time) return;
+
       this.blockUser = true;
       this.editForm = book;
 
       let read = true;
-      if (this.editForm.read[0]) read = false;
+      if (this.editForm.read[0]) {
+        read = false;
+        
+        // books[index].read = false;
+        books[index].progress = 0;
+      }
+      else
+      {
+        setInterval(function() {
+          if (book.progress<book.time) {
+              book.progress++;
+          }
+        }, 1000);
+      }
       const payload = {
         title: this.editForm.title,
         read,
+        model: this.editForm.model
       };
+      
+
+
       this.updateBook(payload, this.editForm.id);
     },
     updateBook(payload, bookID) {
       const path = `http://10.19.199.137:5000/books/${bookID}`;
+
+
+
       axios.put(path, payload)
         .then(() => {
           this.getBooks();
